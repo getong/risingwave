@@ -111,6 +111,12 @@ impl<S: StateStore> SourceExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
+        let is_cleaner = if let Some(state_cleaner_id) = mapping.keys().into_iter().next() {
+            self.ctx.id == *state_cleaner_id
+        } else {
+            false
+        };
+
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
             if let Some(target_state) = self.get_diff(Some(target_splits)).await? {
                 tracing::info!(
@@ -124,6 +130,31 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
+        if is_cleaner {
+            // clean
+
+            let core = self.stream_source_core.as_mut().unwrap();
+
+            core.split_state_store.state_store.dele
+
+            let cache = core
+                .state_cache
+                .values()
+                .map(|split_impl| split_impl.to_owned())
+                .collect_vec();
+
+            if !cache.is_empty() {
+                tracing::debug!(actor_id = self.ctx.id, state = ?cache, "take snapshot");
+                core.split_state_store.take_snapshot(cache).await?
+            }
+            // commit anyway, even if no message saved
+            core.split_state_store.state_store.commit(epoch).await?;
+
+            core.state_cache.clear();
+
+
+        }
+
         Ok(())
     }
 
@@ -133,6 +164,16 @@ impl<S: StateStore> SourceExecutor<S> {
         let core = self.stream_source_core.as_mut().unwrap();
 
         let split_change = rhs.unwrap();
+
+        let target_split_ids: HashSet<_> = split_change.iter().map(|split| split.id()).collect();
+
+        for (split_id, _) in &core.state_cache {
+            if !target_split_ids.contains(split_id) {
+                tracing::info!("removing split id from cache");
+                core.state_cache.remove(split_id);
+            }
+        }
+
         let mut target_state: Vec<SplitImpl> = Vec::with_capacity(split_change.len());
         let mut no_change_flag = true;
         for sc in &split_change {
@@ -155,6 +196,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 core.state_cache
                     .entry(sc.id())
                     .or_insert_with(|| state.clone());
+
                 target_state.push(state);
             }
         }
