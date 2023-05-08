@@ -446,6 +446,7 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                actor_dropped_splits: todo!(),
             }),
             Mutation::Pause => PbMutation::Pause(PauseMutation {}),
             Mutation::Resume => PbMutation::Resume(ResumeMutation {}),

@@ -39,7 +39,9 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
+use crate::stream::{
+    build_actor_connector_splits, SourceManagerRef, SplitAssignment, SplitRemoval,
+};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -67,6 +69,9 @@ pub struct Reschedule {
 
     /// Reassigned splits for source actors
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+
+    /// Dropped splits for source actors
+    pub actor_dropped_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -132,7 +137,10 @@ pub enum Command {
 
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
     /// newly added splits.
-    SourceSplitAssignment(SplitAssignment),
+    SourceSplitAssignment {
+        split_assignment: SplitAssignment,
+        split_removal: SplitRemoval,
+    },
 }
 
 impl Command {
@@ -179,7 +187,7 @@ impl Command {
                 let to_remove = old_table_fragments.actor_ids().into_iter().collect();
                 CommandChanges::Actor { to_add, to_remove }
             }
-            Command::SourceSplitAssignment(_) => CommandChanges::None,
+            Command::SourceSplitAssignment(_, _) => CommandChanges::None,
         }
     }
 
@@ -254,15 +262,24 @@ where
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
 
-            Command::SourceSplitAssignment(change) => {
-                let mut diff = HashMap::new();
+            Command::SourceSplitAssignment {
+                split_assignment,
+                split_removal,
+            } => {
+                let mut assignment = HashMap::new();
+                let mut removal = HashMap::new();
 
-                for actor_splits in change.values() {
-                    diff.extend(actor_splits.clone());
+                for actor_splits in split_assignment.values() {
+                    assignment.extend(actor_splits.clone());
+                }
+
+                for actor_splits in split_removal.values() {
+                    removal.extend(actor_splits.clone());
                 }
 
                 Some(Mutation::Splits(SourceChangeSplitMutation {
-                    actor_splits: build_actor_connector_splits(&diff),
+                    actor_dropped_splits: build_actor_connector_splits(&removal),
+                    actor_splits: build_actor_connector_splits(&assignment),
                 }))
             }
 
@@ -529,7 +546,9 @@ where
                 _ => {}
             },
 
-            Command::SourceSplitAssignment(split_assignment) => {
+            Command::SourceSplitAssignment {
+                split_assignment, ..
+            } => {
                 self.fragment_manager
                     .update_actor_splits_by_split_assignment(split_assignment)
                     .await?;

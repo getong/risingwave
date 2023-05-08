@@ -69,6 +69,7 @@ message UpdateMutation {
 
 message SourceChangeSplitMutation {
   map<uint32, source.ConnectorSplits> actor_splits = 2;
+  map<uint32, source.ConnectorSplits> actor_dropped_splits = 3;
 }
 
 message PauseMutation {}
