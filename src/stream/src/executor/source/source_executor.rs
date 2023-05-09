@@ -248,7 +248,7 @@ impl<S: StateStore> SourceExecutor<S> {
             match mutation.as_ref() {
                 Mutation::Add { splits, .. }
                 | Mutation::Update {
-                    actor_splits: splits,
+                    actor_split_assignment: splits,
                     ..
                 } => {
                     if let Some(splits) = splits.get(&self.ctx.id) {
@@ -322,13 +322,13 @@ impl<S: StateStore> SourceExecutor<S> {
 
                         if let Some(ref mutation) = barrier.mutation.as_deref() {
                             match mutation {
-                                Mutation::SourceChangeSplit(actor_splits) => {
-                                    self.apply_split_change(&source_desc, &mut stream, actor_splits)
+                                Mutation::SourceChangeSplit { split_assignment, split_removal: _split_removal } => {
+                                    self.apply_split_change(&source_desc, &mut stream, split_assignment)
                                         .await?
                                 }
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
-                                Mutation::Update { actor_splits, .. } => {
+                                Mutation::Update { actor_split_assignment: actor_splits, .. } => {
                                     self.apply_split_change(
                                         &source_desc,
                                         &mut stream,

@@ -1089,7 +1089,7 @@ mod tests {
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
-            actor_splits: Default::default(),
+            actor_split_assignment: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
@@ -1140,7 +1140,7 @@ mod tests {
             merges: Default::default(),
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
-            actor_splits: Default::default(),
+            actor_split_assignment: Default::default(),
         });
         tx.send(Message::Barrier(b3)).await.unwrap();
         executor.next().await.unwrap().unwrap();

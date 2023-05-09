@@ -31,7 +31,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
-use risingwave_connector::source::SplitImpl;
+use risingwave_connector::source::{SplitId, SplitImpl};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 use risingwave_pb::data::{PbDatum, PbEpoch};
@@ -227,7 +227,8 @@ pub enum Mutation {
         merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
         vnode_bitmaps: HashMap<ActorId, Arc<Bitmap>>,
         dropped_actors: HashSet<ActorId>,
-        actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+        actor_split_assignment: HashMap<ActorId, Vec<SplitImpl>>,
+        actor_split_removal: HashMap<ActorId, Vec<SplitImpl>>,
     },
     Add {
         adds: HashMap<ActorId, Vec<PbDispatcher>>,
@@ -235,7 +236,10 @@ pub enum Mutation {
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
         splits: HashMap<ActorId, Vec<SplitImpl>>,
     },
-    SourceChangeSplit(HashMap<ActorId, Vec<SplitImpl>>),
+    SourceChangeSplit {
+        split_assignment: HashMap<ActorId, Vec<SplitImpl>>,
+        split_removal: HashMap<ActorId, Vec<SplitImpl>>,
+    },
     Pause,
     Resume,
 }
@@ -404,7 +408,8 @@ impl Mutation {
                 merges,
                 vnode_bitmaps,
                 dropped_actors,
-                actor_splits,
+                actor_split_assignment,
+                actor_split_removal,
             } => PbMutation::Update(UpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -413,7 +418,8 @@ impl Mutation {
                     .map(|(&actor_id, bitmap)| (actor_id, bitmap.to_protobuf()))
                     .collect(),
                 dropped_actors: dropped_actors.iter().cloned().collect(),
-                actor_splits: actor_splits_to_protobuf(actor_splits),
+                actor_splits: actor_splits_to_protobuf(actor_split_assignment),
+                actor_splits_removal: actor_splits_to_protobuf(actor_split_removal),
             }),
             Mutation::Add {
                 adds,
@@ -434,7 +440,7 @@ impl Mutation {
                 added_actors: added_actors.iter().copied().collect(),
                 actor_splits: actor_splits_to_protobuf(splits),
             }),
-            Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
+            Mutation::SourceChangeSplit {} => PbMutation::Splits(SourceChangeSplitMutation {
                 actor_splits: changes
                     .iter()
                     .map(|(&actor_id, splits)| {
@@ -474,8 +480,22 @@ impl Mutation {
                     .map(|(&actor_id, bitmap)| (actor_id, Arc::new(bitmap.into())))
                     .collect(),
                 dropped_actors: update.dropped_actors.iter().cloned().collect(),
-                actor_splits: update
+                actor_split_assignment: update
                     .actor_splits
+                    .iter()
+                    .map(|(&actor_id, splits)| {
+                        (
+                            actor_id,
+                            splits
+                                .splits
+                                .iter()
+                                .map(|split| split.try_into().unwrap())
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+                actor_split_removal: update
+                    .actor_splits_removal
                     .iter()
                     .map(|(&actor_id, splits)| {
                         (

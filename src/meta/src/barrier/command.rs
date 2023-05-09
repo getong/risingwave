@@ -433,14 +433,24 @@ where
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
 
-                let mut actor_splits = HashMap::new();
+                let mut actor_splits_assignment = HashMap::new();
+                let mut actor_splits_removal = HashMap::new();
 
                 for reschedule in reschedules.values() {
-                    for (actor_id, splits) in &reschedule.actor_split_assignment {
-                        actor_splits.insert(
+                    for (actor_id, splits_to_assign) in &reschedule.actor_split_assignment {
+                        actor_splits_assignment.insert(
                             *actor_id as ActorId,
                             ConnectorSplits {
-                                splits: splits.iter().map(ConnectorSplit::from).collect(),
+                                splits: splits_to_assign.iter().map(ConnectorSplit::from).collect(),
+                            },
+                        );
+                    }
+
+                    for (actor_id, splits_to_remove) in &reschedule.actor_split_removal {
+                        actor_splits_removal.insert(
+                            *actor_id as ActorId,
+                            ConnectorSplits {
+                                splits: splits_to_remove.iter().map(ConnectorSplit::from).collect(),
                             },
                         );
                     }
@@ -451,7 +461,8 @@ where
                     merge_update,
                     actor_vnode_bitmap_update,
                     dropped_actors,
-                    actor_splits,
+                    actor_splits: actor_splits_assignment,
+                    actor_splits_removal,
                 });
                 tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
@@ -641,8 +652,10 @@ where
 
                 for (fragment_id, reschedule) in reschedules {
                     if !reschedule.actor_split_assignment.is_empty() {
-                        stream_source_actor_splits
-                            .insert(*fragment_id as FragmentId, reschedule.actor_split_assignment.clone());
+                        stream_source_actor_splits.insert(
+                            *fragment_id as FragmentId,
+                            reschedule.actor_split_assignment.clone(),
+                        );
                         stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
                     }
                 }
