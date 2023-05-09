@@ -713,7 +713,8 @@ where
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
                     downstream_fragment_ids,
-                    actor_splits,
+                    actor_split_assignment: actor_splits,
+                    actor_split_removal: _,
                 } = reschedule;
 
                 let mut table_fragment = table_fragments.get_mut(table_id).unwrap();

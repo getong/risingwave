@@ -39,7 +39,7 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
+use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment, SplitChange};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -66,7 +66,10 @@ pub struct Reschedule {
     pub downstream_fragment_ids: Vec<FragmentId>,
 
     /// Reassigned splits for source actors
-    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub actor_split_assignment: HashMap<ActorId, Vec<SplitImpl>>,
+
+    /// Removed splits for source actors
+    pub actor_split_removal: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -130,9 +133,9 @@ pub enum Command {
         merge_updates: Vec<MergeUpdate>,
     },
 
-    /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
+    /// `SourceSplitChange` generates Plain(Mutation::Splits) for pushing initialized splits or
     /// newly added splits.
-    SourceSplitAssignment(SplitAssignment),
+    SourceSplitChange(SplitChange),
 }
 
 impl Command {
@@ -179,7 +182,7 @@ impl Command {
                 let to_remove = old_table_fragments.actor_ids().into_iter().collect();
                 CommandChanges::Actor { to_add, to_remove }
             }
-            Command::SourceSplitAssignment(_) => CommandChanges::None,
+            Command::SourceSplitChange(_) => CommandChanges::None,
         }
     }
 
@@ -254,15 +257,24 @@ where
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
 
-            Command::SourceSplitAssignment(change) => {
-                let mut diff = HashMap::new();
+            Command::SourceSplitChange(SplitChange {
+                assignment,
+                removal,
+            }) => {
+                let mut diff_assignment = HashMap::new();
+                let mut diff_removal = HashMap::new();
 
-                for actor_splits in change.values() {
-                    diff.extend(actor_splits.clone());
+                for actor_splits in assignment.values() {
+                    diff_assignment.extend(actor_splits.clone());
+                }
+
+                for actor_splits in removal.values() {
+                    diff_removal.extend(actor_splits.clone());
                 }
 
                 Some(Mutation::Splits(SourceChangeSplitMutation {
-                    actor_splits: build_actor_connector_splits(&diff),
+                    actor_splits: build_actor_connector_splits(&diff_assignment),
+                    actor_splits_removal: build_actor_connector_splits(&diff_removal),
                 }))
             }
 
@@ -424,7 +436,7 @@ where
                 let mut actor_splits = HashMap::new();
 
                 for reschedule in reschedules.values() {
-                    for (actor_id, splits) in &reschedule.actor_splits {
+                    for (actor_id, splits) in &reschedule.actor_split_assignment {
                         actor_splits.insert(
                             *actor_id as ActorId,
                             ConnectorSplits {
@@ -529,12 +541,12 @@ where
                 _ => {}
             },
 
-            Command::SourceSplitAssignment(split_assignment) => {
+            Command::SourceSplitChange(SplitChange { assignment, .. }) => {
                 self.fragment_manager
-                    .update_actor_splits_by_split_assignment(split_assignment)
+                    .update_actor_splits_by_split_assignment(assignment)
                     .await?;
                 self.source_manager
-                    .apply_source_change(None, Some(split_assignment.clone()), None)
+                    .apply_source_change(None, Some(assignment.clone()), None)
                     .await;
             }
 
@@ -628,9 +640,9 @@ where
                 let mut stream_source_dropped_actors = HashSet::new();
 
                 for (fragment_id, reschedule) in reschedules {
-                    if !reschedule.actor_splits.is_empty() {
+                    if !reschedule.actor_split_assignment.is_empty() {
                         stream_source_actor_splits
-                            .insert(*fragment_id as FragmentId, reschedule.actor_splits.clone());
+                            .insert(*fragment_id as FragmentId, reschedule.actor_split_assignment.clone());
                         stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
                     }
                 }

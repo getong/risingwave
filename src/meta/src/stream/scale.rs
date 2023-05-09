@@ -40,7 +40,7 @@ use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::GlobalStreamManager;
+use crate::stream::{GlobalStreamManager, SplitDiff};
 use crate::MetaResult;
 
 #[derive(Debug)]
@@ -1051,7 +1051,7 @@ where
             let upstream_fragment_dispatcher_ids =
                 upstream_fragment_dispatcher_set.into_iter().collect_vec();
 
-            let actor_splits = fragment_stream_source_actor_splits
+            let SplitDiff { assignment, removal } = fragment_stream_source_actor_splits
                 .get(&fragment_id)
                 .cloned()
                 .unwrap_or_default();
@@ -1065,7 +1065,8 @@ where
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
                     downstream_fragment_ids,
-                    actor_splits,
+                    actor_split_assignment: assignment,
+                    actor_split_removal: removal
                 },
             );
         }

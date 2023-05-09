@@ -44,6 +44,13 @@ use crate::MetaResult;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
+pub type SplitRemoval = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
+
+#[derive(Debug, Clone)]
+pub struct SplitChange {
+    pub assignment: SplitAssignment,
+    pub removal: SplitRemoval,
+}
 
 pub struct SourceManager<S: MetaStore> {
     pub(crate) paused: Mutex<()>,
@@ -240,8 +247,9 @@ where
         }
     }
 
-    async fn diff(&self) -> MetaResult<SplitAssignment> {
+    async fn diff(&self) -> MetaResult<SplitChange> {
         let mut split_assignment: SplitAssignment = HashMap::new();
+        let mut split_removal: SplitRemoval = HashMap::new();
 
         for (source_id, handle) in &self.managed_sources {
             let fragment_ids = match self.source_fragments.get(source_id) {
@@ -283,13 +291,17 @@ where
                         &discovered_splits,
                         SplitDiffOptions::default(),
                     ) {
-                        split_assignment.insert(*fragment_id, change);
+                        split_assignment.insert(*fragment_id, change.assignment);
+                        split_removal.insert(*fragment_id, change.removal);
                     }
                 }
             }
         }
 
-        Ok(split_assignment)
+        Ok(SplitChange {
+            assignment: split_assignment,
+            removal: split_removal,
+        })
     }
 
     pub fn apply_source_change(
@@ -398,16 +410,31 @@ impl Default for SplitDiffOptions {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SplitDiff<T: SplitMetaData + Clone> {
+    pub assignment: HashMap<ActorId, Vec<T>>,
+    pub removal: HashMap<ActorId, Vec<T>>,
+}
+
+impl<T: SplitMetaData + Clone> Default for SplitDiff<T> {
+    fn default() -> Self {
+        SplitDiff {
+            assignment: Default::default(),
+            removal: Default::default(),
+        }
+    }
+}
+
 fn diff_splits<T>(
-    actor_splits: HashMap<ActorId, Vec<T>>,
+    prev_actor_splits: HashMap<ActorId, Vec<T>>,
     discovered_splits: &BTreeMap<SplitId, T>,
     opts: SplitDiffOptions,
-) -> Option<HashMap<ActorId, Vec<T>>>
+) -> Option<SplitDiff<T>>
 where
     T: SplitMetaData + Clone,
 {
     // if no actors, return
-    if actor_splits.is_empty() {
+    if prev_actor_splits.is_empty() {
         return None;
     }
 
@@ -415,7 +442,7 @@ where
         tracing::warn!("no splits discovered");
     }
 
-    let prev_split_ids: HashSet<_> = actor_splits
+    let prev_split_ids: HashSet<_> = prev_actor_splits
         .values()
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
@@ -465,11 +492,16 @@ where
         }
     }
 
-    let mut heap = BinaryHeap::with_capacity(actor_splits.len());
+    let mut heap = BinaryHeap::with_capacity(prev_actor_splits.len());
 
-    for (actor_id, mut splits) in actor_splits {
+    let mut removal = HashMap::new();
+
+    for (actor_id, mut splits) in prev_actor_splits {
         if opts.enable_scale_in {
-            splits.drain_filter(|split| dropped_splits.contains(&split.id()));
+            let removed_split = splits
+                .drain_filter(|split| dropped_splits.contains(&split.id()))
+                .collect_vec();
+            removal.insert(actor_id, removed_split);
         }
 
         heap.push(ActorSplitsAssignment { actor_id, splits })
@@ -482,11 +514,15 @@ where
             .push(discovered_splits.get(&split_id).cloned().unwrap());
     }
 
-    Some(
-        heap.into_iter()
-            .map(|ActorSplitsAssignment { actor_id, splits }| (actor_id, splits))
-            .collect(),
-    )
+    let assignment = heap
+        .into_iter()
+        .map(|ActorSplitsAssignment { actor_id, splits }| (actor_id, splits))
+        .collect();
+
+    Some(SplitDiff {
+        assignment,
+        removal,
+    })
 }
 
 impl<S> SourceManager<S>
@@ -579,7 +615,7 @@ where
         &self,
         fragment_id: &FragmentId,
         actor_ids: impl IntoIterator<Item = ActorId>,
-    ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
+    ) -> MetaResult<SplitDiff<SplitImpl>> {
         let core = self.core.lock().await;
         let source_id = core.fragment_sources.get(fragment_id).unwrap();
         let handle = core.managed_sources.get(source_id).unwrap();
@@ -605,10 +641,10 @@ where
             .map(|actor_id| (actor_id, vec![]))
             .collect();
 
-        Ok(
-            diff_splits(empty_actor_splits, &splits, SplitDiffOptions::default())
-                .unwrap_or_default(),
-        )
+        let change = diff_splits(empty_actor_splits, &splits, SplitDiffOptions::default())
+            .unwrap_or_default();
+
+        Ok(change)
     }
 
     pub async fn pre_allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
@@ -658,7 +694,8 @@ where
                 if let Some(diff) =
                     diff_splits(empty_actor_splits, &splits, SplitDiffOptions::default())
                 {
-                    assigned.insert(fragment_id, diff);
+                    assigned.insert(fragment_id, diff.assignment);
+                    assert!(diff.removal.is_empty());
                 }
             }
         }
@@ -740,13 +777,13 @@ where
     }
 
     async fn tick(&self) -> MetaResult<()> {
-        let diff = {
+        let change = {
             let core_guard = self.core.lock().await;
             core_guard.diff().await?
         };
 
-        if !diff.is_empty() {
-            let command = Command::SourceSplitAssignment(diff);
+        if !change.assignment.is_empty() || !change.removal.is_empty() {
+            let command = Command::SourceSplitChange(change);
             tracing::debug!("pushing down command {:#?}", command);
             self.barrier_scheduler.run_command(command).await?;
         }
