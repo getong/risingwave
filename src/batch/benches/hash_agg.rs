@@ -101,6 +101,7 @@ fn create_hash_agg_executor(
         "HashAggExecutor".to_string(),
         CHUNK_SIZE,
         MonitoredGlobalAlloc::for_test(),
+        None,
     ))
 }
 
