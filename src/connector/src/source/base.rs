@@ -228,7 +228,7 @@ impl ConnectorProperties {
     pub fn enable_split_reduction(&self) -> bool {
         // for now, we only support kinesis
         match self {
-            ConnectorProperties::Kinesis(prop) => prop.enable_split_reduction.unwrap_or(false),
+            ConnectorProperties::Kinesis(prop) => prop.enable_split_reduction,
             _ => false,
         }
     }

@@ -20,6 +20,7 @@ pub mod split;
 use serde::Deserialize;
 
 use crate::common::KinesisCommon;
+use crate::deserialize_bool_from_string;
 
 pub const KINESIS_CONNECTOR: &str = "kinesis";
 
@@ -36,10 +37,16 @@ pub struct KinesisProperties {
 
     #[serde(
         rename = "enable.split.reduction",
-        alias = "kinesis.enable.split.reduction"
+        alias = "kinesis.enable.split.reduction",
+        deserialize_with = "deserialize_bool_from_string",
+        default = "default_kinesis_enable_split_reduction"
     )]
-    pub enable_split_reduction: Option<bool>,
+    pub enable_split_reduction: bool,
 
     #[serde(flatten)]
     pub common: KinesisCommon,
+}
+
+const fn default_kinesis_enable_split_reduction() -> bool {
+    false
 }
