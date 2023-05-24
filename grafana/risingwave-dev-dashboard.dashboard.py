@@ -1372,7 +1372,7 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
+                panels.timeseries_count(
                     "Batch Mpp Task Number",
                     "",
                     [
@@ -1382,12 +1382,22 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
+                panels.timeseries_memory(
                     "Batch Mem Usage",
                     "All memory usage of batch executors in bytes",
                     [
                         panels.target(
                             f"{metric('batch_total_mem')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Batch Heartbeat Worker Number",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('batch_heartbeat_worker_num')}",
                             "",
                         ),
                     ],
