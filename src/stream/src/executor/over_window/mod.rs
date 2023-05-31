@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod eowc;
+mod general;
 mod state;
 
 pub use eowc::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
