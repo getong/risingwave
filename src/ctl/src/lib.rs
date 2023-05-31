@@ -212,9 +212,12 @@ enum MetaCommands {
     /// Use ; to separate multiple fragment
     #[clap(verbatim_doc_comment)]
     Reschedule {
-        /// Plan of reschedule
+        /// Plan of reschedule, from args
         #[clap(long)]
-        plan: String,
+        plan: Option<String>,
+        /// Plan of reschedule, from file
+        #[clap(long)]
+        from_file: Option<String>,
         /// Show the plan only, no actual operation
         #[clap(long)]
         dry_run: bool,
@@ -348,9 +351,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::SourceSplitInfo) => {
             cmd_impl::meta::source_split_info(context).await?
         }
-        Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
-            cmd_impl::meta::reschedule(context, plan, dry_run).await?
-        }
+        Commands::Meta(MetaCommands::Reschedule {
+            plan,
+            from_file,
+            dry_run,
+        }) => cmd_impl::meta::reschedule(context, plan, from_file, dry_run).await?,
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
