@@ -129,9 +129,14 @@ where
         let to_create_mv = first_barrier.is_newly_added(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
-            let snapshot = Self::snapshot_read(&self.table, init_epoch, None, false);
-            pin_mut!(snapshot);
-            snapshot.try_next().await?.unwrap().is_none()
+            if !to_create_mv {
+                // We don't need to create mv, so just assign a value.
+                false
+            } else {
+                let snapshot = Self::snapshot_read(&self.table, init_epoch, None, false);
+                pin_mut!(snapshot);
+                snapshot.try_next().await?.unwrap().is_none()
+            }
         };
         let to_backfill = to_create_mv && !is_snapshot_empty;
 
