@@ -14,6 +14,7 @@
 
 use std::ops::Bound::*;
 
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -169,20 +170,32 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     user_key: begin_key.clone(),
                     epoch: self.read_epoch,
                 };
-                self.iterator.seek(full_key.to_ref()).await?;
-                self.delete_range_iter.seek(begin_key.as_ref()).await?;
+                self.iterator
+                    .seek(full_key.to_ref())
+                    .verbose_instrument_await("iter-seek")
+                    .await?;
+                self.delete_range_iter
+                    .seek(begin_key.as_ref())
+                    .verbose_instrument_await("delete-range-seek")
+                    .await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => {
-                self.iterator.rewind().await?;
-                self.delete_range_iter.rewind().await?;
+                self.iterator
+                    .rewind()
+                    .verbose_instrument_await("iter-rewind")
+                    .await?;
+                self.delete_range_iter
+                    .rewind()
+                    .verbose_instrument_await("delete-range-rewind")
+                    .await?;
             }
         };
 
         // Handle multi-version
         self.last_key = FullKey::default();
         // Handles range scan when key > end_key
-        self.next().await
+        self.next().verbose_instrument_await("next-first-key").await
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
