@@ -668,7 +668,10 @@ impl MetaClient {
     }
 
     pub async fn reschedule(&self, reschedules: HashMap<u32, PbReschedule>) -> Result<bool> {
-        let request = RescheduleRequest { reschedules };
+        let request = RescheduleRequest {
+            reschedules,
+            version: unimplemented!(),
+        };
         let resp = self.inner.reschedule(request).await?;
         Ok(resp.success)
     }

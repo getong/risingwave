@@ -27,7 +27,9 @@ use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
-use crate::stream::{GlobalStreamManagerRef, ParallelUnitReschedule, SourceManagerRef};
+use crate::stream::{
+    GlobalStreamManagerRef, ParallelUnitReschedule, RescheduleVersion, SourceManagerRef,
+};
 
 pub struct ScaleServiceImpl<S: MetaStore> {
     barrier_scheduler: BarrierScheduler<S>,
@@ -132,36 +134,41 @@ where
     ) -> Result<Response<RescheduleResponse>, Status> {
         let req = request.into_inner();
 
-        self.stream_manager
-            .reschedule_actors(
-                req.reschedules
-                    .into_iter()
-                    .map(|(fragment_id, reschedule)| {
-                        let Reschedule {
-                            added_parallel_units,
-                            removed_parallel_units,
-                        } = reschedule;
+        let reschedule = req
+            .reschedules
+            .into_iter()
+            .map(|(fragment_id, reschedule)| {
+                let Reschedule {
+                    added_parallel_units,
+                    removed_parallel_units,
+                } = reschedule;
 
-                        (
-                            fragment_id,
-                            ParallelUnitReschedule {
-                                added_parallel_units: added_parallel_units
-                                    .into_iter()
-                                    .sorted()
-                                    .dedup()
-                                    .collect(),
-                                removed_parallel_units: removed_parallel_units
-                                    .into_iter()
-                                    .sorted()
-                                    .dedup()
-                                    .collect(),
-                            },
-                        )
-                    })
-                    .collect(),
-            )
+                (
+                    fragment_id,
+                    ParallelUnitReschedule {
+                        added_parallel_units: added_parallel_units
+                            .into_iter()
+                            .sorted()
+                            .dedup()
+                            .collect(),
+                        removed_parallel_units: removed_parallel_units
+                            .into_iter()
+                            .sorted()
+                            .dedup()
+                            .collect(),
+                    },
+                )
+            })
+            .collect();
+
+        let next_version = self
+            .stream_manager
+            .reschedule_actors(reschedule, req.version)
             .await?;
 
-        Ok(Response::new(RescheduleResponse { success: true }))
+        Ok(Response::new(RescheduleResponse {
+            success: true,
+            version: next_version,
+        }))
     }
 }

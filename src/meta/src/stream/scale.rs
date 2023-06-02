@@ -38,10 +38,38 @@ use uuid::Uuid;
 
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::MetaStore;
+use crate::model::{
+    ActorId, DispatcherId, FragmentId, MetadataModel, MetadataModelResult, TableFragments,
+};
+use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 use crate::stream::GlobalStreamManager;
 use crate::MetaResult;
+
+pub struct RescheduleVersion {
+    version: u64,
+}
+
+impl RescheduleVersion {
+    const KEY: &'static [u8] = b"reschedule_version";
+
+    pub async fn get<S: MetaStore>(store: &S) -> MetaResult<Self> {
+        let value = store.get_cf(DEFAULT_COLUMN_FAMILY, Self::KEY).await?;
+        let version = memcomparable::from_slice(&value)
+            .map_err(|e| anyhow!("Failed to deserialize reschedule version: {:?}", e))?;
+
+        Ok(RescheduleVersion { version })
+    }
+
+    pub async fn put<S: MetaStore>(store: &S, version: u64) -> MetaResult<()> {
+        let value = memcomparable::to_vec(&version)
+            .map_err(|e| anyhow!("Failed to serialize reschedule version: {:?}", e))?;
+        store
+            .put_cf(DEFAULT_COLUMN_FAMILY, Self::KEY.to_vec(), value)
+            .await?;
+
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub struct ParallelUnitReschedule {
@@ -546,7 +574,15 @@ where
     pub async fn reschedule_actors(
         &self,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
-    ) -> MetaResult<()> {
+        version: u64,
+    ) -> MetaResult<u64> {
+        let _lock = self.reschedule_lock.lock().await;
+        let current_version = RescheduleVersion::get(self.env.meta_store()).await?;
+
+        if version < current_version.version {
+            bail!("123");
+        }
+
         let mut revert_funcs = vec![];
         if let Err(e) = self
             .reschedule_actors_impl(&mut revert_funcs, reschedules)
@@ -557,6 +593,10 @@ where
             }
             return Err(e);
         }
+
+        let next_version = current_version.version + 1;
+        RescheduleVersion::put(self.env.meta_store(), next_version).await?;
+
         Ok(())
     }
 
