@@ -23,6 +23,7 @@ use std::time::Duration;
 use futures::{FutureExt, StreamExt};
 use minitrace::prelude::*;
 use parking_lot::Mutex;
+use prometheus::IntGauge;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
@@ -351,7 +352,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
     /// such, parallel consumers are able to consume the result independently.
-    pub async fn async_execute(self: Arc<Self>, state_tx: Option<StateReporter>) -> Result<()> {
+    pub async fn async_execute(
+        self: Arc<Self>,
+        state_tx: Option<StateReporter>,
+        metric: Option<IntGauge>,
+    ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
             "Prepare executing plan [{:?}]: {}",
@@ -368,7 +373,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         )
         .build()
         .await?;
-
+        
         let sender = self.sender.clone();
         let _failure = self.failure.clone();
         let task_id = self.task_id.clone();
@@ -455,12 +460,24 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 },
                 ctx2,
             );
-            self.runtime.spawn(alloc_stat_wrap_fut);
+            self.runtime.spawn(async move {
+                let result = alloc_stat_wrap_fut.await;
+                if let Some(ref m) = metric {
+                    m.dec();
+                }
+                result
+            });
         }
 
         #[cfg(not(enable_task_local_alloc))]
         {
-            self.runtime.spawn(fut);
+            self.runtime.spawn(async move {
+                let result = fut.await;
+                if let Some(ref m) = metric {
+                    m.dec();
+                }
+                result
+            });
         }
 
         Ok(())

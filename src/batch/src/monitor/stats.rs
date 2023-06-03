@@ -415,6 +415,7 @@ pub struct BatchManagerMetrics {
     pub task_num: IntGauge,
     pub batch_total_mem: TrAdderGauge,
     pub batch_heartbeat_worker_num: IntGauge,
+    pub batch_async_exec_num: IntGauge,
 }
 
 impl BatchManagerMetrics {
@@ -430,6 +431,11 @@ impl BatchManagerMetrics {
             "Total number of heartbeat worker for batch tasks.",
         )
         .unwrap();
+        let batch_async_exec_num = IntGauge::new(
+            "batch_async_exec_num",
+            "Total number of async exec for batch tasks.",
+        )
+        .unwrap();
 
         registry.register(Box::new(task_num.clone())).unwrap();
         registry
@@ -438,10 +444,14 @@ impl BatchManagerMetrics {
         registry
             .register(Box::new(batch_heartbeat_worker_num.clone()))
             .unwrap();
+        registry
+            .register(Box::new(batch_async_exec_num.clone()))
+            .unwrap();
         Self {
             task_num,
             batch_total_mem,
             batch_heartbeat_worker_num,
+            batch_async_exec_num,
         }
     }
 

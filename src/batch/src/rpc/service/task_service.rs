@@ -128,7 +128,7 @@ impl TaskService for BatchServiceImpl {
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
-        if let Err(e) = task.clone().async_execute(None).await {
+        if let Err(e) = task.clone().async_execute(None, None).await {
             error!(
                 "failed to build executors and trigger execution of Task {:?}: {}",
                 task_id, e
