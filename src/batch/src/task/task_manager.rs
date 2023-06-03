@@ -124,11 +124,16 @@ impl BatchManager {
             ))
             .into())
         };
-        task.async_execute(Some(state_reporter))
-            .await
-            .inspect_err(|_| {
-                self.cancel_task(&task_id.to_prost());
-            })?;
+        self.metrics.batch_async_exec_num.inc();
+        task.async_execute(
+            Some(state_reporter),
+            Some(self.metrics.batch_async_exec_num.clone()),
+        )
+        .await
+        .inspect_err(|_| {
+            self.metrics.batch_async_exec_num.dec();
+            self.cancel_task(&task_id.to_prost());
+        })?;
         ret
     }
 
