@@ -19,6 +19,7 @@ assert_matches = "1"
 async-recursion = "1"
 async-stream = "0.3.4"
 async-trait = "0.1"
+await-tree = { workspace = true }
 either = "1"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

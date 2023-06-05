@@ -20,6 +20,7 @@ use std::sync::Arc;
 #[cfg(enable_task_local_alloc)]
 use std::time::Duration;
 
+use await_tree::InstrumentAwait;
 use futures::{FutureExt, StreamExt};
 use minitrace::prelude::*;
 use parking_lot::Mutex;
@@ -373,7 +374,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         )
         .build()
         .await?;
-        
+
         let sender = self.sender.clone();
         let _failure = self.failure.clone();
         let task_id = self.task_id.clone();
@@ -520,6 +521,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         mut sender: ChanSenderImpl,
         state_tx: Option<&mut StateReporter>,
     ) {
+        tracing::info!("task started {:?}", self.task_id);
         let mut data_chunk_stream = root.execute();
         let mut state;
         let mut error = None;
@@ -530,6 +532,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 biased;
                 // `shutdown_rx` can't be removed here to avoid `sender.send(data_chunk)` blocked whole execution.
                 _ = shutdown_rx.changed() => {
+                    tracing::info!("task shutdown {:?}", self.task_id);
                     match self.shutdown_rx.borrow().clone() {
                         ShutdownMsg::Abort(e) => {
                             error = Some(BatchError::Aborted(e));
@@ -545,7 +548,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         }
                     }
                 }
-                date_chunk = data_chunk_stream.next()=> {
+                date_chunk = data_chunk_stream.next().verbose_instrument_await("batch_run_data_next")=> {
                     match date_chunk {
                         Some(Ok(data_chunk)) => {
                             if let Err(e) = sender.send(data_chunk).await {
@@ -620,6 +623,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 e
             );
         }
+        tracing::info!("task stopped {:?}", self.task_id);
     }
 
     pub fn abort(&self, err_msg: String) {

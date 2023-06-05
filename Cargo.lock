@@ -5642,6 +5642,7 @@ dependencies = [
  "async-recursion",
  "async-stream",
  "async-trait",
+ "await-tree",
  "criterion",
  "either",
  "fixedbitset",
