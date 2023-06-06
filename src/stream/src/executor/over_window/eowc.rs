@@ -234,18 +234,23 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         #[for_await]
         for row in table_iter {
             let row: OwnedRow = row?;
-            let order_key = row
-                .datum_at(this.order_key_index)
-                .expect("order key column must be non-NULL")
-                .into_scalar_impl();
-            let encoded_pk = memcmp_encoding::encode_row(
+            let order_key_enc = memcmp_encoding::encode_row(
+                row::once(Some(
+                    row.datum_at(this.order_key_index)
+                        .expect("order key column must be non-NULL")
+                        .into_scalar_impl(),
+                )),
+                &[OrderType::ascending()],
+            )?
+            .into_boxed_slice();
+            let pk_enc = memcmp_encoding::encode_row(
                 (&row).project(&this.input_pk_indices),
                 &vec![OrderType::ascending(); this.input_pk_indices.len()],
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key: order_key.into(),
-                encoded_pk,
+                order_key: order_key_enc,
+                pk: pk_enc,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
                 state.append(
@@ -309,18 +314,24 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             this.state_table.insert(input_row);
 
             // Feed the row to all window states.
-            let order_key = input_row
-                .datum_at(this.order_key_index)
-                .expect("order key column must be non-NULL")
-                .into_scalar_impl();
-            let encoded_pk = memcmp_encoding::encode_row(
+            let order_key_enc = memcmp_encoding::encode_row(
+                row::once(Some(
+                    input_row
+                        .datum_at(this.order_key_index)
+                        .expect("order key column must be non-NULL")
+                        .into_scalar_impl(),
+                )),
+                &[OrderType::ascending()],
+            )?
+            .into_boxed_slice();
+            let pk_enc = memcmp_encoding::encode_row(
                 input_row.project(&this.input_pk_indices),
                 &vec![OrderType::ascending(); this.input_pk_indices.len()],
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key: order_key.into(),
-                encoded_pk,
+                order_key: order_key_enc,
+                pk: pk_enc,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
                 state.append(
@@ -373,14 +384,17 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     .expect("# of evict hints = # of window func calls");
                 if let StateEvictHint::CanEvict(keys_to_evict) = evict_hint {
                     for key in keys_to_evict {
+                        let order_key = memcmp_encoding::decode_row(
+                            &key.order_key,
+                            &[this.info.schema[this.order_key_index].data_type()],
+                            &[OrderType::ascending()],
+                        )?;
                         let pk = memcmp_encoding::decode_row(
-                            &key.encoded_pk,
+                            &key.pk,
                             &this.pk_data_types,
                             &vec![OrderType::ascending(); this.input_pk_indices.len()],
                         )?;
-                        let state_row_pk = (&partition_key)
-                            .chain(row::once(Some(key.order_key.into_inner())))
-                            .chain(pk);
+                        let state_row_pk = (&partition_key).chain(order_key).chain(pk);
                         let state_row = {
                             // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
                             let mut state_row = vec![None; this.state_table_schema_len];
