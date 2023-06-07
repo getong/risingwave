@@ -31,7 +31,8 @@ use risingwave_expr::function::window::WindowFuncCall;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::state::{create_window_state, EstimatedVecDeque, WindowState};
+use super::state::{create_window_state, EstimatedVecDeque};
+use super::window_states::WindowStates;
 use super::MemcmpEncoded;
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
@@ -43,40 +44,14 @@ use crate::executor::{
 use crate::task::AtomicU64Ref;
 
 struct Partition {
-    states: Vec<Box<dyn WindowState + Send>>,
+    states: WindowStates,
     curr_row_buffer: EstimatedVecDeque<OwnedRow>,
-}
-
-impl Partition {
-    fn new(calls: &[WindowFuncCall]) -> StreamExecutorResult<Self> {
-        let states = calls.iter().map(create_window_state).try_collect()?;
-        Ok(Self {
-            states,
-            curr_row_buffer: Default::default(),
-        })
-    }
-
-    fn is_aligned(&self) -> bool {
-        if self.states.is_empty() {
-            true
-        } else {
-            self.states
-                .iter()
-                .map(|state| state.curr_window().key)
-                .all_equal()
-        }
-    }
-
-    fn is_ready(&self) -> bool {
-        debug_assert!(self.is_aligned());
-        self.states.iter().all(|state| state.curr_window().is_ready)
-    }
 }
 
 impl EstimateSize for Partition {
     fn estimated_heap_size(&self) -> usize {
         let mut total_size = self.curr_row_buffer.estimated_heap_size();
-        for state in &self.states {
+        for state in self.states.iter() {
             total_size += state.estimated_heap_size();
         }
         total_size
@@ -223,7 +198,10 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             return Ok(());
         }
 
-        let mut partition = Partition::new(&this.calls)?;
+        let mut partition = Partition {
+            states: WindowStates::new(this.calls.iter().map(create_window_state).try_collect()?),
+            curr_row_buffer: Default::default(),
+        };
 
         // Recover states from state table.
         let table_iter = this
@@ -252,7 +230,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 order_key: order_key_enc,
                 pk: pk_enc,
             };
-            for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
+            for (call, state) in this.calls.iter().zip_eq_fast(partition.states.iter_mut()) {
                 state.append(
                     key.clone(),
                     (&row)
@@ -266,13 +244,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         }
 
         // Ensure states correctness.
-        assert!(partition.is_aligned());
+        assert!(partition.states.is_aligned());
 
         // Ignore ready windows (all ready windows were outputted before).
-        while partition.is_ready() {
-            for state in &mut partition.states {
-                state.slide_forward();
-            }
+        while partition.states.is_ready() {
+            partition.states.just_slide_forward();
             partition.curr_row_buffer.pop_front();
         }
 
@@ -333,7 +309,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 order_key: order_key_enc,
                 pk: pk_enc,
             };
-            for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
+            for (call, state) in this.calls.iter().zip_eq_fast(partition.states.iter_mut()) {
                 state.append(
                     key.clone(),
                     input_row
@@ -347,22 +323,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 .curr_row_buffer
                 .push_back(input_row.into_owned_row());
 
-            while partition.is_ready() {
+            while partition.states.is_ready() {
                 // The partition is ready to output, so we can produce a row.
 
                 // Get all outputs.
-                let (ret_values, evict_hints): (Vec<_>, Vec<_>) = {
-                    let tmp: Vec<_> = partition
-                        .states
-                        .iter_mut()
-                        .map(|state| -> StreamExecutorResult<_> {
-                            let ret_val = state.curr_output()?;
-                            let evict_hint = state.slide_forward();
-                            Ok((ret_val, evict_hint))
-                        })
-                        .try_collect()?;
-                    tmp.into_iter().unzip()
-                };
+                let ret_values = partition.states.curr_output()?;
                 let curr_row = partition
                     .curr_row_buffer
                     .pop_front()
@@ -378,10 +343,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 }
 
                 // Evict unneeded rows from state table.
-                let evict_hint = evict_hints
-                    .into_iter()
-                    .reduce(StateEvictHint::merge)
-                    .expect("# of evict hints = # of window func calls");
+                let evict_hint = partition.states.slide_forward();
                 if let StateEvictHint::CanEvict(keys_to_evict) = evict_hint {
                     for key in keys_to_evict {
                         let order_key = memcmp_encoding::decode_row(
