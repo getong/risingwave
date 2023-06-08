@@ -46,6 +46,12 @@ impl LagState {
             curr_idx: 0,
         }
     }
+
+    fn curr_key(&self) -> Option<&StateKey> {
+        self.buffer
+            .get(self.curr_idx)
+            .map(|BufferEntry(key, _)| key)
+    }
 }
 
 impl WindowState for LagState {
@@ -55,14 +61,7 @@ impl WindowState for LagState {
     }
 
     fn curr_window(&self) -> StatePos<'_> {
-        // 2 cases:
-        // 1. `curr_index` is in the buffer, then it's ready.
-        // 2. `curr_index` is not in the buffer, then it points to the next input row, which
-        //    means `curr_index == buffer.len()`.
-        let curr_key = self
-            .buffer
-            .get(self.curr_idx)
-            .map(|BufferEntry(key, _)| key);
+        let curr_key = self.curr_key();
         StatePos {
             key: curr_key,
             is_ready: curr_key.is_some(),
@@ -70,7 +69,6 @@ impl WindowState for LagState {
     }
 
     fn curr_output(&self) -> StreamExecutorResult<Datum> {
-        assert!(self.curr_window().is_ready);
         Ok(if self.curr_idx < self.offset {
             // the ready window doesn't have enough preceding rows, just return NULL
             None
@@ -82,7 +80,10 @@ impl WindowState for LagState {
     }
 
     fn slide_forward(&mut self) -> StateEvictHint {
-        assert!(self.curr_window().is_ready);
+        assert!(
+            self.curr_key().is_some(),
+            "should not slide when `curr_key` is None"
+        );
         if self.curr_idx < self.offset {
             self.curr_idx += 1;
             StateEvictHint::CannotEvict(self.buffer.front().unwrap().0.clone())

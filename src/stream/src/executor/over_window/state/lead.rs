@@ -44,6 +44,10 @@ impl LeadState {
             buffer: Default::default(),
         }
     }
+
+    fn curr_key(&self) -> Option<&StateKey> {
+        self.buffer.front().map(|BufferEntry(key, _)| key)
+    }
 }
 
 impl WindowState for LeadState {
@@ -53,7 +57,7 @@ impl WindowState for LeadState {
     }
 
     fn curr_window(&self) -> StatePos<'_> {
-        let curr_key = self.buffer.front().map(|BufferEntry(key, _)| key);
+        let curr_key = self.curr_key();
         StatePos {
             key: curr_key,
             is_ready: self.buffer.len() > self.offset,
@@ -61,12 +65,18 @@ impl WindowState for LeadState {
     }
 
     fn curr_output(&self) -> StreamExecutorResult<Datum> {
-        assert!(self.curr_window().is_ready);
-        Ok(self.buffer[self.offset].1.clone())
+        Ok(self
+            .buffer
+            .get(self.offset)
+            .map(|BufferEntry(_, v)| v.clone())
+            .flatten())
     }
 
     fn slide_forward(&mut self) -> StateEvictHint {
-        assert!(self.curr_window().is_ready);
+        assert!(
+            self.curr_key().is_some(),
+            "should not slide when `curr_key` is None"
+        );
         let BufferEntry(key, _) = self.buffer.pop_front().unwrap();
         StateEvictHint::CanEvict(std::iter::once(key).collect())
     }
