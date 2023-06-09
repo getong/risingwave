@@ -44,17 +44,17 @@ use crate::stream::GlobalStreamManager;
 use crate::{MetaError, MetaResult};
 
 #[derive(Copy, Clone, Debug)]
-pub struct RescheduleRevision(u64);
+pub struct TableRevision(u64);
 
 const RESCHEDULE_VERSION_KEY: &[u8] = b"reschedule_version";
 
-impl From<RescheduleRevision> for u64 {
-    fn from(value: RescheduleRevision) -> Self {
+impl From<TableRevision> for u64 {
+    fn from(value: TableRevision) -> Self {
         value.0
     }
 }
 
-impl RescheduleRevision {
+impl TableRevision {
     pub async fn get<S>(store: &S) -> MetaResult<Self>
     where
         S: MetaStore,
@@ -71,8 +71,8 @@ impl RescheduleRevision {
         Ok(Self(version))
     }
 
-    pub fn increase(&self) -> Self {
-        RescheduleRevision(self.0 + 1)
+    pub fn next(&self) -> Self {
+        TableRevision(self.0 + 1)
     }
 
     pub fn store(&self, txn: &mut Transaction) {
@@ -591,29 +591,26 @@ where
     pub async fn reschedule_actors(
         &self,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
-        current_revision: RescheduleRevision,
-    ) -> MetaResult<RescheduleRevision> {
+    ) -> MetaResult<()> {
         let mut revert_funcs = vec![];
-        match self
-            .reschedule_actors_impl(&mut revert_funcs, reschedules, current_revision)
+        if let Err(e) = self
+            .reschedule_actors_impl(&mut revert_funcs, reschedules)
             .await
         {
-            Err(e) => {
-                for revert_func in revert_funcs.into_iter().rev() {
-                    revert_func.await;
-                }
-                Err(e)
+            for revert_func in revert_funcs.into_iter().rev() {
+                revert_func.await;
             }
-            Ok(revision) => Ok(revision),
+            return Err(e);
         }
+
+        Ok(())
     }
 
     async fn reschedule_actors_impl(
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         mut reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
-        current_revision: RescheduleRevision,
-    ) -> MetaResult<RescheduleRevision> {
+    ) -> MetaResult<()> {
         let ctx = self.build_reschedule_context(&mut reschedules).await?;
         // Index of actors to create/remove
         // Fragment Id => ( Actor Id => Parallel Unit Id )
@@ -1175,16 +1172,13 @@ where
 
         tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
 
-        let next_revision = current_revision.increase();
-
         self.barrier_scheduler
             .run_command_with_paused(Command::RescheduleFragment {
                 reschedules: reschedule_fragment,
-                revision: next_revision,
             })
             .await?;
 
-        Ok(next_revision)
+        Ok(())
     }
 
     async fn create_actors_on_compute_node(

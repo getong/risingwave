@@ -34,7 +34,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{RescheduleRevision, SourceManagerRef};
+use crate::stream::{TableRevision, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
@@ -540,8 +540,8 @@ where
         self.creating_job_info.cancel_jobs(table_ids).await;
     }
 
-    pub async fn reschedule_revision(&self) -> MetaResult<RescheduleRevision> {
-        RescheduleRevision::get(self.env.meta_store()).await
+    pub async fn reschedule_revision(&self) -> MetaResult<TableRevision> {
+        TableRevision::get(self.env.meta_store()).await
     }
 }
 
