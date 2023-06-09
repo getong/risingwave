@@ -256,7 +256,9 @@ where
         dummy_table_id: TableId,
         merge_updates: &[MergeUpdate],
     ) -> MetaResult<()> {
-        let map = &mut self.core.write().await.table_fragments;
+        let mut guard = self.core.write().await;
+        let current_revision = guard.table_revision;
+        let map = &mut guard.table_fragments;
 
         let mut table_fragments = BTreeMapTransaction::new(map);
 
@@ -327,7 +329,17 @@ where
         assert!(merge_updates.is_empty());
 
         // Commit changes and notify about the changes.
-        commit_meta!(self, table_fragments)?;
+        let mut trx = Transaction::default();
+
+        // save next revision
+        let next_revision = current_revision.next();
+        next_revision.store(&mut trx);
+
+        // commit
+        commit_meta_with_trx!(self, trx, table_fragments)?;
+
+        // update revision in memory
+        guard.table_revision = next_revision;
 
         // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
         // catalog and need to access the old fragment. Let frontend nodes delete the old fragment
