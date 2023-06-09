@@ -308,7 +308,20 @@ impl Cluster {
             })
             .await??;
 
-        self.context.reschedule_revision += 1;
+        let current_revision = self
+            .ctl
+            .spawn(async move {
+                let r = risingwave_ctl::cmd_impl::meta::get_cluster_info(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await?;
+
+                Ok::<_, anyhow::Error>(r.revision)
+            })
+            .await??;
+
+        println!("The revision has been set to {}", current_revision);
+        self.context.reschedule_revision = current_revision;
 
         Ok(())
     }
