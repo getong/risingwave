@@ -221,14 +221,10 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 &[OrderType::ascending()],
             )?
             .into_boxed_slice();
-            let pk_enc = memcmp_encoding::encode_row(
-                (&row).project(&this.input_pk_indices),
-                &vec![OrderType::ascending(); this.input_pk_indices.len()],
-            )?
-            .into_boxed_slice();
+            let pk = (&row).project(&this.input_pk_indices).into_owned_row();
             let key = StateKey {
                 order_key: order_key_enc,
-                pk: pk_enc,
+                pk: pk.into(),
             };
             for (call, state) in this.calls.iter().zip_eq_fast(partition.states.iter_mut()) {
                 state.append(
@@ -300,14 +296,10 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 &[OrderType::ascending()],
             )?
             .into_boxed_slice();
-            let pk_enc = memcmp_encoding::encode_row(
-                input_row.project(&this.input_pk_indices),
-                &vec![OrderType::ascending(); this.input_pk_indices.len()],
-            )?
-            .into_boxed_slice();
+            let pk = input_row.project(&this.input_pk_indices).into_owned_row();
             let key = StateKey {
                 order_key: order_key_enc,
-                pk: pk_enc,
+                pk: pk.into(),
             };
             for (call, state) in this.calls.iter().zip_eq_fast(partition.states.iter_mut()) {
                 state.append(
@@ -351,12 +343,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             &[this.info.schema[this.order_key_index].data_type()],
                             &[OrderType::ascending()],
                         )?;
-                        let pk = memcmp_encoding::decode_row(
-                            &key.pk,
-                            &this.pk_data_types,
-                            &vec![OrderType::ascending(); this.input_pk_indices.len()],
-                        )?;
-                        let state_row_pk = (&partition_key).chain(order_key).chain(pk);
+                        let state_row_pk = (&partition_key).chain(order_key).chain(key.pk);
                         let state_row = {
                             // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
                             let mut state_row = vec![None; this.state_table_schema_len];
