@@ -167,6 +167,11 @@ impl ExprImpl {
         .into()
     }
 
+    /// Takes the expression, leaving a literal null of the same type in its place.
+    pub fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::literal_null(self.return_type()))
+    }
+
     /// A `count(*)` aggregate function.
     #[inline(always)]
     pub fn count_star() -> Self {
@@ -176,6 +181,7 @@ impl ExprImpl {
             false,
             OrderBy::any(),
             Condition::true_cond(),
+            vec![],
         )
         .unwrap()
         .into()
@@ -210,29 +216,37 @@ impl ExprImpl {
     }
 
     /// Check whether self is a literal NULL or literal string.
-    pub fn is_unknown(&self) -> bool {
-        matches!(self, ExprImpl::Literal(literal) if literal.return_type() == DataType::Varchar)
+    pub fn is_untyped(&self) -> bool {
+        matches!(self, ExprImpl::Literal(literal) if literal.is_untyped())
             || matches!(self, ExprImpl::Parameter(parameter) if !parameter.has_infer())
     }
 
     /// Shorthand to create cast expr to `target` type in implicit context.
-    pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl, CastError> {
-        FunctionCall::new_cast(self, target, CastContext::Implicit)
+    pub fn cast_implicit(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+        FunctionCall::cast_mut(&mut self, target, CastContext::Implicit)?;
+        Ok(self)
     }
 
     /// Shorthand to create cast expr to `target` type in assign context.
-    pub fn cast_assign(self, target: DataType) -> Result<ExprImpl, CastError> {
-        FunctionCall::new_cast(self, target, CastContext::Assign)
+    pub fn cast_assign(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+        FunctionCall::cast_mut(&mut self, target, CastContext::Assign)?;
+        Ok(self)
     }
 
     /// Shorthand to create cast expr to `target` type in explicit context.
-    pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl, CastError> {
-        FunctionCall::new_cast(self, target, CastContext::Explicit)
+    pub fn cast_explicit(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+        FunctionCall::cast_mut(&mut self, target, CastContext::Explicit)?;
+        Ok(self)
+    }
+
+    /// Shorthand to inplace cast expr to `target` type in implicit context.
+    pub fn cast_implicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
+        FunctionCall::cast_mut(self, target, CastContext::Implicit)
     }
 
     /// Shorthand to enforce implicit cast to boolean
     pub fn enforce_bool_clause(self, clause: &str) -> RwResult<ExprImpl> {
-        if self.is_unknown() {
+        if self.is_untyped() {
             let inner = self.cast_implicit(DataType::Boolean)?;
             return Ok(inner);
         }
