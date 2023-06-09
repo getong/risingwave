@@ -39,9 +39,7 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{
-    build_actor_connector_splits, SourceManagerRef, SplitAssignment, TableRevision,
-};
+use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -617,9 +615,7 @@ where
                     .await;
             }
 
-            Command::RescheduleFragment {
-                reschedules,
-            } => {
+            Command::RescheduleFragment { reschedules } => {
                 let mut node_dropped_actors = HashMap::new();
                 for table_fragments in self.fragment_manager.list_table_fragments().await? {
                     for fragment_id in table_fragments.fragments.keys() {

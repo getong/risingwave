@@ -46,7 +46,7 @@ use crate::{MetaError, MetaResult};
 #[derive(Copy, Clone, Debug)]
 pub struct TableRevision(u64);
 
-const RESCHEDULE_VERSION_KEY: &[u8] = b"reschedule_version";
+const TABLE_REVISION_KEY: &[u8] = b"table_revision";
 
 impl From<TableRevision> for u64 {
     fn from(value: TableRevision) -> Self {
@@ -60,7 +60,7 @@ impl TableRevision {
         S: MetaStore,
     {
         let version = match store
-            .get_cf(DEFAULT_COLUMN_FAMILY, RESCHEDULE_VERSION_KEY)
+            .get_cf(DEFAULT_COLUMN_FAMILY, TABLE_REVISION_KEY)
             .await
         {
             Ok(byte_vec) => memcomparable::from_slice(&byte_vec).unwrap(),
@@ -78,7 +78,7 @@ impl TableRevision {
     pub fn store(&self, txn: &mut Transaction) {
         txn.put(
             DEFAULT_COLUMN_FAMILY.to_string(),
-            RESCHEDULE_VERSION_KEY.to_vec(),
+            TABLE_REVISION_KEY.to_vec(),
             memcomparable::to_vec(&self.0).unwrap(),
         );
     }

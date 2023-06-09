@@ -34,7 +34,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{TableRevision, SourceManagerRef};
+use crate::stream::{SourceManagerRef, TableRevision};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
