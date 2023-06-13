@@ -39,8 +39,7 @@ impl WindowStates {
         debug_assert!(self.is_aligned());
         self.0
             .first()
-            .map(|state| state.curr_window().key)
-            .flatten()
+            .and_then(|state| state.curr_window().key)
     }
 
     pub fn is_ready(&self) -> bool {
