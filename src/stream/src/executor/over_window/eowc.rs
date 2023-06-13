@@ -240,10 +240,10 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         }
 
         // Ensure states correctness.
-        assert!(partition.states.is_aligned());
+        assert!(partition.states.are_aligned());
 
         // Ignore ready windows (all ready windows were outputted before).
-        while partition.states.is_ready() {
+        while partition.states.are_ready() {
             partition.states.just_slide_forward();
             partition.curr_row_buffer.pop_front();
         }
@@ -315,7 +315,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 .curr_row_buffer
                 .push_back(input_row.into_owned_row());
 
-            while partition.states.is_ready() {
+            while partition.states.are_ready() {
                 // The partition is ready to output, so we can produce a row.
 
                 // Get all outputs.

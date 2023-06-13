@@ -28,7 +28,7 @@ impl WindowStates {
         Self(states)
     }
 
-    pub fn is_aligned(&self) -> bool {
+    pub fn are_aligned(&self) -> bool {
         self.0
             .iter()
             .map(|state| state.curr_window().key)
@@ -36,24 +36,22 @@ impl WindowStates {
     }
 
     pub fn curr_key(&self) -> Option<&StateKey> {
-        debug_assert!(self.is_aligned());
-        self.0
-            .first()
-            .and_then(|state| state.curr_window().key)
+        debug_assert!(self.are_aligned());
+        self.0.first().and_then(|state| state.curr_window().key)
     }
 
-    pub fn is_ready(&self) -> bool {
-        debug_assert!(self.is_aligned());
+    pub fn are_ready(&self) -> bool {
+        debug_assert!(self.are_aligned());
         self.0.iter().all(|state| state.curr_window().is_ready)
     }
 
     pub fn curr_output(&self) -> StreamExecutorResult<Vec<Datum>> {
-        debug_assert!(self.is_aligned());
+        debug_assert!(self.are_aligned());
         self.0.iter().map(|state| state.curr_output()).try_collect()
     }
 
     pub fn slide_forward(&mut self) -> StateEvictHint {
-        debug_assert!(self.is_aligned());
+        debug_assert!(self.are_aligned());
         self.0
             .iter_mut()
             .map(|state| state.slide_forward())
@@ -62,7 +60,7 @@ impl WindowStates {
     }
 
     pub fn just_slide_forward(&mut self) {
-        debug_assert!(self.is_aligned());
+        debug_assert!(self.are_aligned());
         self.0
             .iter_mut()
             .for_each(|state| _ = state.slide_forward());
