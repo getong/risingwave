@@ -12,33 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{btree_map, BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::Bound;
 
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
-use itertools::{repeat_n, Itertools};
+use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, DefaultOrdered};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding;
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::function::window::WindowFuncCall;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_expr::function::window::{FrameBounds, WindowFuncCall};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::diff_btree_map::{Change, CursorWithDiff, DiffBTreeMap};
+use super::diff_btree_map::{Change, DiffBTreeMap};
 use super::state::{create_window_state, StateKey};
 use super::MemcmpEncoded;
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::executor::aggregation::ChunkBuilder;
 use crate::executor::over_window::diff_btree_map::PositionType;
-use crate::executor::over_window::state::{StateEvictHint, WindowState};
 use crate::executor::over_window::window_states::WindowStates;
 use crate::executor::test_utils::prelude::StateTable;
 use crate::executor::{
@@ -54,7 +51,8 @@ struct Partition {
 
 impl EstimateSize for Partition {
     fn estimated_heap_size(&self) -> usize {
-        todo!()
+        // TODO()
+        0
     }
 }
 
@@ -255,37 +253,54 @@ impl<S: StateStore> OverWindowExecutor<S> {
         // Build final changes partition by partition.
         for (part_key, diff) in diffs {
             Self::ensure_key_in_cache(this, &mut vars.partitions, &part_key).await?;
-            let partition_with_diff =
-                DiffBTreeMap::new(&vars.partitions.get(&part_key).unwrap().cache, diff);
+            let mut partition = vars.partitions.get_mut(&part_key).unwrap();
+            let partition_with_diff = DiffBTreeMap::new(&partition.cache, diff);
+            let mut part_final_changes = BTreeMap::new();
 
             // TODO(): append change to chunk builder and yield chunk if possible.
-            let yield_change = |input_pk: DefaultOrdered<OwnedRow>, record: Record<OwnedRow>| {
-                if !key_change_updated_pks.contains(&input_pk) {
+            let yield_change = |key: StateKey, record: Record<OwnedRow>| {
+                // Buffer the change inside current partition for later mutation of partition cache.
+                part_final_changes.insert(key.clone(), record.clone());
+
+                // Buffer the change at chunk level (may cross partition) for later mutation of
+                // state table and yielding output chunk.
+                if !key_change_updated_pks.contains(&key.pk) {
                     // not a key-change update, just keep the change as it is
-                    final_changes.insert(input_pk, record);
-                    return;
-                }
-                if let Some(existed) = final_changes.remove(&input_pk) {
+                    final_changes.insert(key.pk, record);
+                } else if let Some(existed) = final_changes.remove(&key.pk) {
                     match (existed, record) {
                         (Record::Insert { new_row }, Record::Delete { old_row })
                         | (Record::Delete { old_row }, Record::Insert { new_row }) => {
                             // merge delete and insert
-                            final_changes.insert(input_pk, Record::Update { old_row, new_row });
+                            final_changes.insert(key.pk, Record::Update { old_row, new_row });
                         }
                         _ => panic!("other cases should not exist"),
                     }
                 } else {
-                    final_changes.insert(input_pk, record);
+                    final_changes.insert(key.pk, record);
                 }
             };
 
             Self::build_changes_for_partition(this, partition_with_diff, yield_change)?;
+
+            // Update partition cache.
+            for (key, record) in part_final_changes {
+                match record {
+                    Record::Insert { new_row } | Record::Update { new_row, .. } => {
+                        // if `Update`, the update is not a key-change update, so it's save
+                        partition.cache.insert(key, new_row);
+                    }
+                    Record::Delete { .. } => {
+                        partition.cache.remove(&key);
+                    }
+                }
+            }
         }
 
-        // Materialize and yield changes.
+        // Materialize changes to state table and yield to downstream.
         let mut chunk_builder = ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types());
         for record in final_changes.into_values() {
-            // TODO(): materialize record
+            this.state_table.write_record(record.as_ref());
             if let Some(chunk) = chunk_builder.append_record(record) {
                 yield chunk;
             }
@@ -298,13 +313,24 @@ impl<S: StateStore> OverWindowExecutor<S> {
     fn build_changes_for_partition(
         this: &ExecutorInner<S>,
         part_with_diff: DiffBTreeMap<'_, StateKey, OwnedRow>,
-        mut yield_change: impl FnMut(DefaultOrdered<OwnedRow>, Record<OwnedRow>),
+        mut yield_change: impl FnMut(StateKey, Record<OwnedRow>),
     ) -> StreamExecutorResult<()> {
         let snapshot = part_with_diff.snapshot();
         let diff = part_with_diff.diff();
         assert!(!diff.is_empty(), "if there's no diff, we won't be here");
 
-        // TODO(): handle delete first
+        // Generate delete changes first, because they're hard to handle during window sliding in
+        // the next step.
+        for (key, change) in diff {
+            if change.is_delete() {
+                yield_change(
+                    key.clone(),
+                    Record::Delete {
+                        old_row: snapshot.get(key).unwrap().clone(),
+                    },
+                );
+            }
+        }
 
         for (first_frame_start, first_curr_key, last_curr_key, last_frame_end) in
             Self::find_affected_ranges(this, &part_with_diff)
@@ -366,15 +392,17 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 );
 
                 match curr_key_cursor.position() {
-                    PositionType::Nowhere => unreachable!(),
+                    PositionType::Ghost => unreachable!(),
                     PositionType::Snapshot | PositionType::DiffUpdate => {
                         // update
                         let old_row = snapshot.get(key).unwrap().clone();
-                        yield_change(key.pk.clone(), Record::Update { old_row, new_row });
+                        if old_row != new_row {
+                            yield_change(key.clone(), Record::Update { old_row, new_row });
+                        }
                     }
                     PositionType::DiffInsert => {
                         // insert
-                        yield_change(key.pk.clone(), Record::Insert { new_row });
+                        yield_change(key.clone(), Record::Insert { new_row });
                     }
                 }
 
@@ -388,17 +416,148 @@ impl<S: StateStore> OverWindowExecutor<S> {
         Ok(())
     }
 
-    /// Find all affected ranges (each as a union of all affected window frames) in the given
-    /// partition.
+    /// Find all affected ranges in the given partition.
     ///
     /// # Returns
     ///
-    /// - `Vec<(first_frame_start, first_curr_key, last_curr_key, last_frame_end_incl)>`
+    /// `Vec<(first_frame_start, first_curr_key, last_curr_key, last_frame_end_incl)>`
+    ///
+    /// Each affected range is a union of many small window frames affected by some adajcent
+    /// keys in the diff.
+    ///
+    /// Example:
+    /// - frame 1: `rows between 2 preceding and current row`
+    /// - frame 2: `rows between 1 preceding and 2 following`
+    /// - partition: `[1, 2, 4, 5, 7, 8, 9, 10, 11, 12, 14]`
+    /// - diff: `[3, 4, 15]`
+    /// - affected ranges: `[(1, 1, 7, 9), (10, 12, 15, 15)]`
+    ///
+    /// TODO(rc):
+    /// Note that, since we assume input chunks have data locality on order key columns, we now only
+    /// calculate one single affected range. So the affected ranges in the above example will be
+    /// `(1, 1, 15, 15)`. Later we may optimize this.
     fn find_affected_ranges(
         this: &ExecutorInner<S>,
         part_with_diff: &DiffBTreeMap<'_, StateKey, OwnedRow>,
     ) -> Vec<(StateKey, StateKey, StateKey, StateKey)> {
-        todo!()
+        let snapshot = part_with_diff.snapshot();
+        let diff = part_with_diff.diff();
+
+        if part_with_diff.first_key().is_none() {
+            // all keys are deleted in the diff
+            return vec![];
+        }
+
+        if part_with_diff.snapshot().is_empty() {
+            // all existing keys are inserted in the diff
+            return vec![(
+                diff.first_key_value().unwrap().0.clone(),
+                diff.first_key_value().unwrap().0.clone(),
+                diff.last_key_value().unwrap().0.clone(),
+                diff.last_key_value().unwrap().0.clone(),
+            )];
+        }
+
+        let (first_frame_start, first_curr_key) = {
+            let first_key = part_with_diff.first_key().unwrap();
+            if this
+                .calls
+                .iter()
+                .any(|call| call.frame.bounds.end_is_unbounded())
+            {
+                // If the frame end is unbounded, the frame corresponding to the first key is always
+                // affected.
+                (first_key.clone(), first_key.clone())
+            } else {
+                let (a, b) = this
+                    .calls
+                    .iter()
+                    .map(|call| match &call.frame.bounds {
+                        FrameBounds::Rows(start, end) => {
+                            let mut ss_cursor = snapshot
+                                .lower_bound(Bound::Included(diff.first_key_value().unwrap().0));
+                            let n_following_rows = end.to_offset().unwrap().max(0) as usize;
+                            for _ in 0..n_following_rows {
+                                if ss_cursor.key().is_some() {
+                                    ss_cursor.move_prev();
+                                }
+                            }
+                            let first_curr_key = ss_cursor.key().unwrap_or(first_key);
+                            let first_frame_start = if let Some(offset) = start.to_offset() {
+                                let n_preceding_rows = offset.min(0).unsigned_abs();
+                                for _ in 0..n_preceding_rows {
+                                    if ss_cursor.key().is_some() {
+                                        ss_cursor.move_prev();
+                                    }
+                                }
+                                ss_cursor.key().unwrap_or(first_key)
+                            } else {
+                                // The frame start is unbounded, so the first affected frame starts
+                                // from the beginning.
+                                first_key
+                            };
+                            (first_frame_start, first_curr_key)
+                        }
+                    })
+                    .reduce(|(x1, y1), (x2, y2)| (x1.min(x2), y1.min(y2)))
+                    .expect("# of window function calls > 0");
+                (a.clone(), b.clone())
+            }
+        };
+
+        let (last_curr_key, last_frame_end) = {
+            let last_key = part_with_diff.last_key().unwrap();
+            if this
+                .calls
+                .iter()
+                .any(|call| call.frame.bounds.start_is_unbounded())
+            {
+                // If the frame start is unbounded, the frame corresponding to the last key is
+                // always affected.
+                (last_key.clone(), last_key.clone())
+            } else {
+                let (a, b) = this
+                    .calls
+                    .iter()
+                    .map(|call| match &call.frame.bounds {
+                        FrameBounds::Rows(start, end) => {
+                            let mut ss_cursor = snapshot
+                                .upper_bound(Bound::Included(diff.last_key_value().unwrap().0));
+                            let n_preceding_rows = start.to_offset().unwrap().min(0).unsigned_abs();
+                            for _ in 0..n_preceding_rows {
+                                if ss_cursor.key().is_some() {
+                                    ss_cursor.move_next();
+                                }
+                            }
+                            let last_curr_key = ss_cursor.key().unwrap_or(last_key);
+                            let last_frame_end = if let Some(offset) = end.to_offset() {
+                                let n_following_rows = offset.max(0) as usize;
+                                for _ in 0..n_following_rows {
+                                    if ss_cursor.key().is_some() {
+                                        ss_cursor.move_next();
+                                    }
+                                }
+                                ss_cursor.key().unwrap_or(last_key)
+                            } else {
+                                // The frame end is unbounded, so the last affected frame ends at
+                                // the end.
+                                last_key
+                            };
+                            (last_curr_key, last_frame_end)
+                        }
+                    })
+                    .reduce(|(x1, y1), (x2, y2)| (x1.max(x2), y1.max(y2)))
+                    .expect("# of window function calls > 0");
+                (a.clone(), b.clone())
+            }
+        };
+
+        vec![(
+            first_frame_start,
+            first_curr_key,
+            last_curr_key,
+            last_frame_end,
+        )]
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -424,7 +583,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => todo!(),
+                Message::Watermark(_) => {
+                    // TODO()
+                }
                 Message::Chunk(chunk) => {
                     #[for_await]
                     for chunk in Self::apply_chunk(&mut this, &mut vars, chunk) {
