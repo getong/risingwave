@@ -24,7 +24,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::memcmp_encoding;
+use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::function::window::{FrameBounds, WindowFuncCall};
 use risingwave_storage::store::PrefetchOptions;
@@ -32,7 +32,6 @@ use risingwave_storage::StateStore;
 
 use super::diff_btree_map::{Change, DiffBTreeMap};
 use super::state::{create_window_state, StateKey};
-use super::MemcmpEncoded;
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::executor::aggregation::ChunkBuilder;
 use crate::executor::over_window::diff_btree_map::PositionType;
