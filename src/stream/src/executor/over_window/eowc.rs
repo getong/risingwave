@@ -24,7 +24,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
-use risingwave_common::util::memcmp_encoding;
+use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{must_match, row};
 use risingwave_expr::function::window::WindowFuncCall;
@@ -33,7 +33,6 @@ use risingwave_storage::StateStore;
 
 use super::state::{create_window_state, EstimatedVecDeque};
 use super::window_states::WindowStates;
-use super::MemcmpEncoded;
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::over_window::state::{StateEvictHint, StateKey};
@@ -219,8 +218,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         .into_scalar_impl(),
                 )),
                 &[OrderType::ascending()],
-            )?
-            .into_boxed_slice();
+            )?;
             let pk = (&row).project(&this.input_pk_indices).into_owned_row();
             let key = StateKey {
                 order_key: order_key_enc,
@@ -269,8 +267,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             let encoded_partition_key = memcmp_encoding::encode_row(
                 &partition_key,
                 &vec![OrderType::ascending(); this.partition_key_indices.len()],
-            )?
-            .into_boxed_slice();
+            )?;
 
             // Get the partition.
             Self::ensure_key_in_cache(
@@ -294,8 +291,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         .into_scalar_impl(),
                 )),
                 &[OrderType::ascending()],
-            )?
-            .into_boxed_slice();
+            )?;
             let pk = input_row.project(&this.input_pk_indices).into_owned_row();
             let key = StateKey {
                 order_key: order_key_enc,

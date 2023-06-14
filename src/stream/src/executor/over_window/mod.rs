@@ -19,5 +19,3 @@ mod state;
 mod window_states;
 
 pub use eowc::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
-
-type MemcmpEncoded = Box<[u8]>;
