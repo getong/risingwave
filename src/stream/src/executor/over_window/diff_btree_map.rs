@@ -46,6 +46,26 @@ impl<'part, K: Ord, V> DiffBTreeMap<'part, K, V> {
         &self.diff
     }
 
+    /// Get the first key in the updated version of the snapshot.
+    pub fn first_key(&self) -> Option<&K> {
+        let cursor = CursorWithDiff {
+            snapshot: self.snapshot,
+            diff: &self.diff,
+            curr_key_value: None,
+        };
+        cursor.peek_next().map(|(key, _)| key)
+    }
+
+    /// Get the last key in the updated version of the snapshot.
+    pub fn last_key(&self) -> Option<&K> {
+        let cursor = CursorWithDiff {
+            snapshot: self.snapshot,
+            diff: &self.diff,
+            curr_key_value: None,
+        };
+        cursor.peek_prev().map(|(key, _)| key)
+    }
+
     /// Get a cursor that can iterate back and forth over the updated version of the snapshot.
     /// If the given key is not found in either the snapshot or the diff, return `None`.
     pub fn find(&self, key: &K) -> Option<CursorWithDiff<'_, K, V>> {
@@ -250,6 +270,8 @@ mod tests {
         let map: BTreeMap<i32, &str> = BTreeMap::new();
         let diff = BTreeMap::new();
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), None);
+        assert_eq!(diff_map.last_key(), None);
         assert_eq!(diff_map.find(&1), None);
 
         let mut map = BTreeMap::new();
@@ -259,6 +281,8 @@ mod tests {
         diff.insert(1, Change::Delete);
         diff.insert(2, Change::Delete);
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), None);
+        assert_eq!(diff_map.last_key(), None);
         assert_eq!(diff_map.find(&1), None);
         assert_eq!(diff_map.find(&2), None);
         assert_eq!(diff_map.find(&3), None);
@@ -272,6 +296,8 @@ mod tests {
         map.insert(5, "5");
         let diff = BTreeMap::new();
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), Some(&1));
+        assert_eq!(diff_map.last_key(), Some(&5));
         assert_eq!(diff_map.find(&100), None);
         let mut cursor = diff_map.find(&2).unwrap();
         assert_eq!(cursor.position(), PositionType::Snapshot);
@@ -310,6 +336,8 @@ mod tests {
         diff.insert(1, Change::Insert("1"));
         diff.insert(2, Change::Insert("2"));
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), Some(&1));
+        assert_eq!(diff_map.last_key(), Some(&2));
         assert_eq!(diff_map.find(&100), None);
         let mut cursor = diff_map.find(&2).unwrap();
         assert_eq!(cursor.position(), PositionType::DiffInsert);
@@ -346,6 +374,8 @@ mod tests {
         diff.insert(1, Change::Delete);
 
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), Some(&3));
+        assert_eq!(diff_map.last_key(), Some(&3));
         assert_eq!(diff_map.find(&1), None);
         assert_eq!(diff_map.find(&2), None);
         let mut cursor = diff_map.find(&3).unwrap();
@@ -373,6 +403,8 @@ mod tests {
         diff.insert(3, Change::Delete);
 
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), Some(&1));
+        assert_eq!(diff_map.last_key(), Some(&1));
         assert_eq!(diff_map.find(&2), None);
         assert_eq!(diff_map.find(&3), None);
         let cursor = diff_map.find(&1).unwrap();
@@ -389,6 +421,8 @@ mod tests {
         diff.insert(2, Change::Insert("2"));
 
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), Some(&1));
+        assert_eq!(diff_map.last_key(), Some(&3));
         assert_eq!(diff_map.find(&10), None);
         let mut cursor = diff_map.find(&2).unwrap();
         assert_eq!(cursor.position(), PositionType::DiffInsert);
@@ -412,6 +446,8 @@ mod tests {
         diff.insert(1, Change::Update("1 new"));
 
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), Some(&1));
+        assert_eq!(diff_map.last_key(), Some(&3));
         let mut cursor = diff_map.find(&1).unwrap();
         assert_eq!(cursor.position(), PositionType::DiffUpdate);
         assert_eq!(cursor.key(), Some(&1));
@@ -437,6 +473,8 @@ mod tests {
         diff.insert(3, Change::Update("3 new"));
 
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), Some(&1));
+        assert_eq!(diff_map.last_key(), Some(&3));
         let mut cursor = diff_map.find(&3).unwrap();
         assert_eq!(cursor.position(), PositionType::DiffUpdate);
         assert_eq!(cursor.key(), Some(&3));
@@ -466,6 +504,8 @@ mod tests {
         diff.insert(4, Change::Insert("4"));
 
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), Some(&0));
+        assert_eq!(diff_map.last_key(), Some(&4));
         assert_eq!(diff_map.find(&-1), None);
         assert_eq!(diff_map.find(&3), None);
         assert_eq!(diff_map.find(&10), None);
@@ -520,6 +560,8 @@ mod tests {
         diff.insert(7, Change::Delete);
         diff.insert(9, Change::Delete);
         let diff_map = DiffBTreeMap::new(&map, diff);
+        assert_eq!(diff_map.first_key(), Some(&0));
+        assert_eq!(diff_map.last_key(), Some(&3));
 
         let mut cursor = diff_map.find(&0).unwrap();
         let mut res = vec![];
