@@ -108,6 +108,8 @@ pub(super) struct CursorWithDiff<'a, K: Ord, V> {
     curr_key_value: Option<(&'a K, &'a V)>,
 }
 
+/// Type of cursor position. [`PositionType::Ghost`] is a special position between the first and
+/// the last item, where the key and value are `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumAsInner)]
 pub(super) enum PositionType {
     Ghost,
@@ -123,6 +125,7 @@ enum PeekDirection {
 }
 
 impl<'a, K: Ord, V> CursorWithDiff<'a, K, V> {
+    /// Get the cursor position type.
     pub fn position(&self) -> PositionType {
         let Some((key, _)) = self.curr_key_value else { return PositionType::Ghost; };
         if self.diff.contains_key(key) {
@@ -139,14 +142,17 @@ impl<'a, K: Ord, V> CursorWithDiff<'a, K, V> {
         }
     }
 
+    /// Get the key pointed by the cursor.
     pub fn key(&self) -> Option<&'a K> {
         self.curr_key_value.map(|(k, _)| k)
     }
 
+    /// Get the value pointed by the cursor.
     pub fn value(&self) -> Option<&'a V> {
         self.curr_key_value.map(|(_, v)| v)
     }
 
+    /// Get the key-value pair pointed by the cursor.
     pub fn key_value(&self) -> Option<(&'a K, &'a V)> {
         self.curr_key_value
     }
@@ -186,6 +192,7 @@ impl<'a, K: Ord, V> CursorWithDiff<'a, K, V> {
         }
     }
 
+    /// Peek the next key-value pair.
     pub fn peek_next(&self) -> Option<(&'a K, &'a V)> {
         if let Some(key) = self.key() {
             let mut ss_cursor = self.snapshot.lower_bound(Bound::Included(key));
@@ -216,6 +223,7 @@ impl<'a, K: Ord, V> CursorWithDiff<'a, K, V> {
         }
     }
 
+    /// Peek the previous key-value pair.
     pub fn peek_prev(&self) -> Option<(&'a K, &'a V)> {
         if let Some(key) = self.key() {
             let mut ss_cursor = self.snapshot.upper_bound(Bound::Included(key));
@@ -250,10 +258,12 @@ impl<'a, K: Ord, V> CursorWithDiff<'a, K, V> {
         }
     }
 
+    /// Move the cursor to the next position.
     pub fn move_next(&mut self) {
         self.curr_key_value = self.peek_next();
     }
 
+    /// Move the cursor to the previous position.
     pub fn move_prev(&mut self) {
         self.curr_key_value = self.peek_prev();
     }
