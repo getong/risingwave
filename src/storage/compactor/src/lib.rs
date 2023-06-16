@@ -18,6 +18,7 @@ mod server;
 mod telemetry;
 
 use clap::Parser;
+use risingwave_common::config::AsyncStackTraceOption;
 use risingwave_common_proc_macro::OverrideConfig;
 
 use crate::server::compactor_serve;
@@ -79,6 +80,11 @@ struct OverrideConfigOpts {
     #[clap(long, env = "RW_MAX_CONCURRENT_TASK_NUMBER")]
     #[override_opts(path = storage.max_concurrent_compaction_task_number)]
     pub max_concurrent_task_number: Option<u64>,
+
+    /// Enable async stack tracing through `await-tree` for risectl.
+    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
+    #[override_opts(path = streaming.async_stack_trace)]
+    pub async_stack_trace: Option<AsyncStackTraceOption>,
 }
 
 use std::future::Future;

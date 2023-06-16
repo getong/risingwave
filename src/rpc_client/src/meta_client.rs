@@ -42,7 +42,7 @@ use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
     Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
-use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
@@ -567,6 +567,15 @@ impl MetaClient {
         };
         self.inner.delete_worker_node(request).await?;
         Ok(())
+    }
+
+    pub async fn list_worker_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
+        let request = ListAllNodesRequest {
+            worker_type: worker_type as _,
+            include_starting_nodes: true,
+        };
+        let resp = self.inner.list_all_nodes(request).await?;
+        Ok(resp.nodes)
     }
 
     /// Starts a heartbeat worker.
@@ -1411,7 +1420,7 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
-            //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
+            ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
