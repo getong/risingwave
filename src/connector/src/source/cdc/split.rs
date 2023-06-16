@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
@@ -55,17 +57,20 @@ impl CdcSplitBase {
 // }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DebeziumOffset {
+    #[serde(rename = "sourcePartition")]
+    source_partition: HashMap<String, String>,
     #[serde(rename = "sourceOffset")]
     source_offset: DebeziumSourceOffset,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DebeziumSourceOffset {
-    // postgres field
+    // postgres snapshot progress
     last_snapshot_record: Option<bool>,
-    // mysql field
+    // mysql snapshot progress
     snapshot: Option<bool>,
     lsn: u64,
+    #[serde(alias = "txId")]
     tx_id: u64,
     ts_usec: u64,
 }
@@ -95,7 +100,7 @@ impl MySqlCdcSplit {
     pub fn copy_with_offset(&self, start_offset: String) -> Self {
         // deserialize the start_offset
         let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-            .unwrap_or_else(|_| panic!("invalid cdc offset: {}", start_offset));
+            .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
 
         info!("dbz_offset: {:?}", dbz_offset);
 
@@ -129,7 +134,7 @@ impl PostgresCdcSplit {
     pub fn copy_with_offset(&self, start_offset: String) -> Self {
         // deserialize the start_offset
         let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
-            .unwrap_or_else(|_| panic!("invalid cdc offset: {}", start_offset));
+            .unwrap_or_else(|e| panic!("invalid cdc offset: {}, error: {}", start_offset, e));
 
         info!("dbz_offset: {:?}", dbz_offset);
         let snapshot_done = dbz_offset
