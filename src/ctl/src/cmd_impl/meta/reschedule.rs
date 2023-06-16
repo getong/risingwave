@@ -16,7 +16,8 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Error, Result};
 use regex::{Match, Regex};
-use risingwave_pb::meta::Reschedule;
+use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
+use risingwave_pb::meta::{GetReschedulePlanResponse, Reschedule};
 
 use crate::CtlContext;
 
@@ -134,4 +135,14 @@ pub async fn reschedule(
     }
 
     Ok(())
+}
+
+pub async fn get_reschedule_plan(
+    context: &CtlContext,
+    policy: PbPolicy,
+    revision: u64,
+) -> Result<GetReschedulePlanResponse> {
+    let meta_client = context.meta_client().await?;
+    let response = meta_client.get_reschedule_plan(policy, revision).await?;
+    Ok(response)
 }
