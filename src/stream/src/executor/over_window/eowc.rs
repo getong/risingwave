@@ -102,7 +102,6 @@ struct ExecutorInner<S: StateStore> {
     info: ExecutorInfo,
 
     calls: Vec<WindowFuncCall>,
-    pk_data_types: Vec<DataType>,
     input_pk_indices: Vec<usize>,
     partition_key_indices: Vec<usize>,
     order_key_index: usize, // no `OrderType` here, cuz we expect the input is ascending
@@ -160,12 +159,6 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             schema
         };
 
-        let pk_data_types = input_info
-            .pk_indices
-            .iter()
-            .map(|&i| input_info.schema.fields()[i].data_type())
-            .collect();
-
         Self {
             input: args.input,
             inner: ExecutorInner {
@@ -176,7 +169,6 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     identity: format!("EowcOverWindowExecutor {:X}", args.executor_id),
                 },
                 calls: args.calls,
-                pk_data_types,
                 input_pk_indices: input_info.pk_indices,
                 partition_key_indices: args.partition_key_indices,
                 order_key_index: args.order_key_index,
