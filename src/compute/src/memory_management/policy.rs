@@ -39,14 +39,17 @@ impl JemallocMemoryControl {
     pub fn new(total_memory: usize, wkx_operator_cache_capacity_mb: usize) -> Self {
         let hack_total_compute_memory_bytes = wkx_operator_cache_capacity_mb << 20;
         tracing::info!(
-            "WKXLOG hack_total_compute_memory_bytes/wkx_operator_cache_capacity_mb: {}, total_memory: {}",
-            memory_control_policy.describe(hack_total_compute_memory_bytes),
-            memory_control_policy.describe(total_memory)
+            "WKXLOG hack_total_compute_memory_bytes(wkx_operator_cache_capacity_mb << 20): {}, total_memory: {}",
+            hack_total_compute_memory_bytes,
+            total_memory
         );
 
-        let threshold_stable = (hack_total_compute_memory_bytes as f64 * Self::THRESHOLD_STABLE) as usize;
-        let threshold_graceful = (hack_total_compute_memory_bytes as f64 * Self::THRESHOLD_GRACEFUL) as usize;
-        let threshold_aggressive = (hack_total_compute_memory_bytes as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
+        let threshold_stable =
+            (hack_total_compute_memory_bytes as f64 * Self::THRESHOLD_STABLE) as usize;
+        let threshold_graceful =
+            (hack_total_compute_memory_bytes as f64 * Self::THRESHOLD_GRACEFUL) as usize;
+        let threshold_aggressive =
+            (hack_total_compute_memory_bytes as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
         Self {
             threshold_stable,
             threshold_graceful,
@@ -75,7 +78,7 @@ impl MemoryControl for JemallocMemoryControl {
         // We calculate the watermark of the LRU cache, which provides hints for streaming executors
         // on cache eviction. Here we do the calculation based on jemalloc statistics.
 
-        let streaming_memory_usage = stream_manager.total_mem_usage();
+        // let streaming_memory_usage = stream_manager.total_mem_usage();
         let (lru_watermark_step, lru_watermark_time_ms, lru_physical_now) = calculate_lru_watermark(
             jemalloc_allocated_mib,
             self.threshold_stable,
